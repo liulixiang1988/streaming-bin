@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebSocket Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 {
+      font-size: 1.6rem;
+      margin-bottom: 20px;
+      color: #00d4ff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .status-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: #ff4757;
+      display: inline-block;
+      transition: background 0.3s;
+    }
+    .status-dot.connected { background: #2ed573; }
+    .status-text {
+      font-size: 0.85rem;
+      color: #888;
+      margin-left: auto;
+    }
+    .panel {
+      background: #16213e;
+      border: 1px solid #0f3460;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .panel-title {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #888;
+      margin-bottom: 12px;
+    }
+    .row { display: flex; gap: 10px; align-items: center; }
+    input[type="text"] {
+      flex: 1;
+      padding: 10px 14px;
+      background: #0a0a1a;
+      border: 1px solid #0f3460;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input[type="text"]:focus { border-color: #00d4ff; }
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    button:hover { opacity: 0.85; }
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-connect { background: #2ed573; color: #1a1a2e; }
+    .btn-disconnect { background: #ff4757; color: #fff; }
+    .btn-send { background: #00d4ff; color: #1a1a2e; }
+    .btn-clear { background: #444; color: #ccc; font-size: 0.8rem; padding: 6px 14px; }
+    .messages {
+      background: #0a0a1a;
+      border: 1px solid #0f3460;
+      border-radius: 6px;
+      height: 420px;
+      overflow-y: auto;
+      padding: 12px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 0.82rem;
+      line-height: 1.6;
+    }
+    .messages::-webkit-scrollbar { width: 6px; }
+    .messages::-webkit-scrollbar-track { background: transparent; }
+    .messages::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 3px; }
+    .msg { margin-bottom: 4px; word-break: break-all; }
+    .msg-time { color: #555; }
+    .msg-system { color: #ffa502; }
+    .msg-sent { color: #00d4ff; }
+    .msg-received { color: #2ed573; }
+    .msg-error { color: #ff4757; }
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .stats {
+      display: flex;
+      gap: 20px;
+      margin-top: 10px;
+      font-size: 0.8rem;
+      color: #888;
+    }
+    .stats span { color: #00d4ff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>
+      <span class="status-dot" id="statusDot"></span>
+      WebSocket Test
+      <span class="status-text" id="statusText">Disconnected</span>
+    </h1>
+
+    <div class="panel">
+      <div class="panel-title">Connection</div>
+      <div class="row">
+        <input type="text" id="urlInput" placeholder="ws://host:port/path" />
+        <button class="btn-connect" id="connectBtn" onclick="doConnect()">Connect</button>
+        <button class="btn-disconnect" id="disconnectBtn" onclick="doDisconnect()" disabled>Disconnect</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Send Message</div>
+      <div class="row">
+        <input type="text" id="messageInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter')doSend()" disabled />
+        <button class="btn-send" id="sendBtn" onclick="doSend()" disabled>Send</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="header-row">
+        <div class="panel-title" style="margin-bottom:0">Messages</div>
+        <button class="btn-clear" onclick="clearMessages()">Clear</button>
+      </div>
+      <div class="messages" id="messages"></div>
+      <div class="stats">
+        Sent: <span id="sentCount">0</span> &nbsp;|&nbsp;
+        Received: <span id="recvCount">0</span> &nbsp;|&nbsp;
+        Duration: <span id="duration">-</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    let sentCount = 0;
+    let recvCount = 0;
+    let connectedAt = null;
+    let durationTimer = null;
+
+    const $ = id => document.getElementById(id);
+
+    // Auto-fill the WebSocket URL based on current page host and protocol
+    // Use wss:// for HTTPS pages, ws:// for HTTP pages
+    // Prefer 127.0.0.1 over localhost to bypass corporate proxy/firewall WebSocket interception
+    const isSecure = window.location.protocol === 'https:';
+    const wsProto = isSecure ? 'wss://' : 'ws://';
+    const pageHost = window.location.host || '127.0.0.1:8080';
+    const wsHost = pageHost.replace(/^localhost(:|$)/, '127.0.0.1$1');
+    $('urlInput').value = wsProto + wsHost + '/ws';
+
+    function getTime() {
+      return new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+    }
+
+    function appendMsg(text, cls) {
+      const el = $('messages');
+      const div = document.createElement('div');
+      div.className = 'msg ' + (cls || '');
+      div.innerHTML = '<span class="msg-time">[' + getTime() + ']</span> ' + escapeHtml(text);
+      el.appendChild(div);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function setConnected(connected) {
+      $('statusDot').className = 'status-dot' + (connected ? ' connected' : '');
+      $('statusText').textContent = connected ? 'Connected' : 'Disconnected';
+      $('connectBtn').disabled = connected;
+      $('disconnectBtn').disabled = !connected;
+      $('messageInput').disabled = !connected;
+      $('sendBtn').disabled = !connected;
+      if (connected) {
+        $('messageInput').focus();
+      }
+    }
+
+    function updateDuration() {
+      if (!connectedAt) { $('duration').textContent = '-'; return; }
+      const sec = Math.floor((Date.now() - connectedAt) / 1000);
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      $('duration').textContent = m + 'm ' + s + 's';
+    }
+
+    function doConnect() {
+      const url = $('urlInput').value.trim();
+      if (!url) return;
+
+      appendMsg('Connecting to ' + url + ' ...', 'msg-system');
+
+      try {
+        ws = new WebSocket(url);
+      } catch (e) {
+        appendMsg('Failed to create WebSocket: ' + e.message, 'msg-error');
+        return;
+      }
+
+      ws.onopen = () => {
+        setConnected(true);
+        connectedAt = Date.now();
+        durationTimer = setInterval(updateDuration, 1000);
+        appendMsg('Connection opened', 'msg-system');
+      };
+
+      ws.onmessage = (event) => {
+        recvCount++;
+        $('recvCount').textContent = recvCount;
+        let display = event.data;
+        try {
+          const parsed = JSON.parse(event.data);
+          display = JSON.stringify(parsed, null, 2);
+        } catch {}
+        appendMsg('\u2b07 ' + display, 'msg-received');
+      };
+
+      ws.onclose = (event) => {
+        setConnected(false);
+        clearInterval(durationTimer);
+        appendMsg('Connection closed (code: ' + event.code + ', reason: ' + (event.reason || 'none') + ')', 'msg-system');
+        ws = null;
+      };
+
+      ws.onerror = (event) => {
+        appendMsg('WebSocket error occurred', 'msg-error');
+      };
+    }
+
+    function doDisconnect() {
+      if (ws) {
+        ws.close(1000, 'User disconnected');
+        appendMsg('Disconnecting...', 'msg-system');
+      }
+    }
+
+    function doSend() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const msg = $('messageInput').value.trim();
+      if (!msg) return;
+
+      ws.send(msg);
+      sentCount++;
+      $('sentCount').textContent = sentCount;
+      appendMsg('\u2b06 ' + msg, 'msg-sent');
+      $('messageInput').value = '';
+      $('messageInput').focus();
+    }
+
+    function clearMessages() {
+      $('messages').innerHTML = '';
+      sentCount = 0; recvCount = 0;
+      $('sentCount').textContent = '0';
+      $('recvCount').textContent = '0';
+    }
+  </script>
+</body>
+</html>

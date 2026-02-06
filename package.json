@@ -1,0 +1,21 @@
+{
+  "name": "mock-sse-ws-service",
+  "version": "1.0.0",
+  "description": "Mock SSE and WebSocket service for testing",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "docker:build": "docker build -t mock-sse-service .",
+    "docker:run": "docker run -d -p 8080:8080 --name mock-sse mock-sse-service",
+    "docker:stop": "docker stop mock-sse && docker rm mock-sse"
+  },
+  "keywords": ["sse", "websocket", "mock", "testing"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
